@@ -7,7 +7,7 @@ import pandas as pd
 import seaborn as sb
 import torch
 import transformers
-import xgboost
+import xgboost as xgb
 from matplotlib import pyplot as plt
 from scipy.stats import chi2_contingency
 from sklearn.linear_model import LogisticRegression
@@ -23,7 +23,9 @@ from sklearn.metrics import (
     recall_score,
 )
 from sklearn.model_selection import train_test_split
-from sklearn.multioutput import MultiOutputClassifier
+from sklearn.multioutput import ClassifierChain, MultiOutputClassifier
+from sklearn.utils import class_weight
+from transformers import MarianMTModel, MarianTokenizer, Pipeline, pipeline
 
 # %% load Bert models
 tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
@@ -146,7 +148,7 @@ for p in ax.patches:
 plt.show()
 
 
-# %% Create embeddings
+# %% Data preprocessing
 max_len = max([len(tokenizer.encode(text)) for text in file_en.text])
 features = []
 for text in file_en.text:
@@ -168,6 +170,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 
+# %% Modelization
 # test single target
 moc = MultiOutputClassifier(LogisticRegression())
 moc.fit(X_train, y_train)
@@ -182,8 +185,6 @@ for i in y_test:
     print(i + ":", accuracy_score(y_test[i], pred[:, 0]))
 
 # test multi label
-from sklearn.multioutput import ClassifierChain
-
 cc = ClassifierChain(LogisticRegression())
 cc.fit(X_train, y_train)
 pred = cc.predict(X_test)
@@ -193,7 +194,8 @@ multilabel_confusion_matrix(y_test, pred)
 
 # Ensemble classifier Chain
 lr = LogisticRegression()
-chains = [ClassifierChain(lr, order="random", random_state=i) for i in range(10)]
+chains = [ClassifierChain(lr, order="random", random_state=i)
+          for i in range(10)]
 for chain in chains:
     chain.fit(X_train, y_train)
 
@@ -224,8 +226,6 @@ ensemble_qccuracy_score = accuracy_score(y_test, y_pred_ensemble >= 0.5)
 
 # Classifier chain with adapted model
 # using xgboost class_weight instead of over or undersampling
-import xgboost as xgb
-from sklearn.utils import class_weight
 
 xgb_param = {
     "n_estimators": 500,
@@ -281,7 +281,6 @@ file_ua[file_ua.columns[1:]] = file_ua[file_ua.columns[1:]].apply(
 )
 
 # Translate text to english
-from transformers import MarianMTModel, MarianTokenizer, Pipeline, pipeline
 
 tokenizer = MarianTokenizer.from_pretrained("Helsinki-NLP/opus-mt-uk-en")
 model = MarianMTModel.from_pretrained("Helsinki-NLP/opus-mt-uk-en")
@@ -291,7 +290,8 @@ translater = pipeline(
     tokenizer=tokenizer,
     truncation=True,
 )
-ls_translated = [i["translation_text"] for i in translater(file_ua.text.tolist())]
+ls_translated = [i["translation_text"]
+                 for i in translater(file_ua.text[:1].tolist())]
 file_ua.text = ls_translated
 
 # %% data analysis
@@ -400,10 +400,19 @@ plt.show()
 
 
 # Améliorations:
+# créer un env avec poetry pour store les package etc
 # tester autres data
 # si données UK différentes de EN, concaténer les deux bases
 # Cross validation avec un split stratitifié pour conserver le déséquilibre
 # tester un classifier chain avec un model custom pour chaque target et pas le même modèle pour tous
 # tester un stacked single target
 # Tester de construire des target complètement décorrélés
-# Tester une méthode avec réseaux bayésien (en utilisant d-separation) avec un bow comme text processing
+# Tester une méthode avec réseaux bayésien (en utilisant d-separation) avec un bow comme text processing -> Conditional corrélation
+# tester une approche data centric pour corriger les data -> cleanlab
+
+
+(file_ua.env_problems - file_en.env_problems).sum()
+(file_ua.pollution - file_en.pollution).sum()
+(file_ua.treatment - file_en.treatment).sum()
+(file_ua.climate - file_en.climate).sum()
+(file_ua.biomonitoring - file_en.biomonitoring).sum()
